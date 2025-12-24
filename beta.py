@@ -17,6 +17,24 @@ from pydub import AudioSegment
 from audio_separator.separator import Separator
 from audio_separator.separator import architectures
 
+# Helper function to scan the local 'audios' folder
+def get_local_audio_files(folder_name="audios"):
+    """Scans the local folder for audio files and returns a list of filenames."""
+    if not os.path.exists(folder_name):
+        try:
+            os.makedirs(folder_name)
+            print(f"Created directory: {folder_name}")
+        except OSError as e:
+            print(f"Error creating directory {folder_name}: {e}")
+            return []
+    
+    valid_extensions = ('.wav', '.mp3', '.flac', '.ogg', '.m4a', '.wma', '.aac')
+    try:
+        files = [f for f in os.listdir(folder_name) if f.lower().endswith(valid_extensions)]
+        return sorted(files)
+    except Exception as e:
+        print(f"Error listing files in {folder_name}: {e}")
+        return []
 
 class AudioSeparatorD:
     def __init__(self):
@@ -44,7 +62,6 @@ class AudioSeparatorD:
             "device": "cuda" if torch.cuda.is_available() else ("mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else "cpu"),
         }
         
-        # Only add memory info if CUDA is available
         if torch.cuda.is_available():
             info["memory_total"] = torch.cuda.get_device_properties(0).total_memory
             info["memory_allocated"] = torch.cuda.memory_allocated()
@@ -57,23 +74,18 @@ class AudioSeparatorD:
     def analyze_audio_characteristics(self, audio_file: str) -> Dict:
         """Analyze audio file characteristics for smart model selection"""
         try:
-            # Load audio for analysis
             y, sr = librosa.load(audio_file, sr=None)
             duration = len(y) / sr
             
-            # Analyze spectral characteristics
             spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
             spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)[0]
             zero_crossing_rate = librosa.feature.zero_crossing_rate(y)[0]
             
-            # Analyze tempo and rhythm
             tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
             
-            # Analyze dynamic range
             rms = librosa.feature.rms(y=y)[0]
             dynamic_range = np.std(rms)
             
-            # Determine audio characteristics
             characteristics = {
                 "duration": duration,
                 "sample_rate": sr,
@@ -117,16 +129,10 @@ class AudioSeparatorD:
                 models = self.separator.list_supported_model_files()
                 simplified_models = self.separator.get_simplified_model_list()
                 
-                # Enhance model information
                 enhanced_models = {}
                 for model_name, model_info in simplified_models.items():
-                    # Parse model filename for better names
                     friendly_name = self._generate_friendly_name(model_name, model_info)
-                    
-                    # Determine best use cases
                     use_cases = self._determine_use_cases(model_name, model_info)
-                    
-                    # Estimate performance characteristics
                     perf_chars = self._estimate_performance(model_name)
                     
                     enhanced_models[model_name] = {
@@ -145,10 +151,8 @@ class AudioSeparatorD:
     
     def _generate_friendly_name(self, model_name: str, model_info: Dict) -> str:
         """Generate user-friendly model names"""
-        # Remove common prefixes and suffixes
         clean_name = model_name.replace('model_', '').replace('.ckpt', '').replace('.yaml', '')
         
-        # Handle specific known models
         if 'roformer' in model_name.lower():
             return f"🎵 Roformer {clean_name.split('_')[-1] if '_' in clean_name else ''}".strip()
         elif 'demucs' in model_name.lower():
@@ -156,7 +160,6 @@ class AudioSeparatorD:
         elif 'mdx' in model_name.lower():
             return f"🎤 MDX-Net {clean_name[-3:] if clean_name[-3:].isdigit() else ''}".strip()
         else:
-            # Capitalize words
             words = clean_name.replace('_', ' ').split()
             return ' '.join(word.capitalize() for word in words)
     
@@ -164,7 +167,6 @@ class AudioSeparatorD:
         """Determine what this model is best for"""
         use_cases = []
         
-        # Check output stems
         if 'vocals' in str(model_info).lower():
             use_cases.append("🎤 Vocal Isolation")
         if 'drums' in str(model_info).lower():
@@ -176,7 +178,6 @@ class AudioSeparatorD:
         if 'guitar' in str(model_info).lower() or 'piano' in str(model_info).lower():
             use_cases.append("🎸 Specific Instruments")
         
-        # Architecture-based use cases
         if 'roformer' in model_name.lower():
             use_cases.append("⚡ High Quality")
         elif 'demucs' in model_name.lower():
@@ -184,7 +185,7 @@ class AudioSeparatorD:
         elif 'mdx' in model_name.lower():
             use_cases.append("🎵 Fast Processing")
         
-        return use_cases[:3]  # Limit to top 3
+        return use_cases[:3]
     
     def _estimate_performance(self, model_name: str) -> Dict:
         """Estimate performance characteristics"""
@@ -253,13 +254,10 @@ class AudioSeparatorD:
             if not models:
                 return None
             
-            # Score models based on criteria
             model_scores = {}
             
             for model_name, model_info in models.items():
                 score = 0
-                
-                # Base score from performance characteristics
                 perf_chars = model_info.get('performance_characteristics', {})
                 
                 if priority == "quality":
@@ -273,7 +271,6 @@ class AudioSeparatorD:
                     elif perf_chars.get('speed_rating') == 'medium':
                         score += 5
                 
-                # Audio type matching
                 audio_type = audio_characteristics.get('audio_type', 'balanced')
                 use_cases = model_info.get('use_cases', [])
                 
@@ -284,13 +281,11 @@ class AudioSeparatorD:
                 elif audio_type == 'upbeat' and '🎹 Instrumental' in use_cases:
                     score += 6
                 
-                # Stem compatibility
                 model_stems = str(model_info).lower()
                 for stem in desired_stems:
                     if stem.lower() in model_stems:
                         score += 5
                 
-                # Architecture preference based on priority
                 arch_type = model_info.get('architecture_type', '')
                 if priority == "quality" and "Roformer" in arch_type:
                     score += 15
@@ -299,7 +294,6 @@ class AudioSeparatorD:
                 
                 model_scores[model_name] = score
             
-            # Return highest scoring model
             if model_scores:
                 best_model = max(model_scores.items(), key=lambda x: x[1])
                 return best_model[0]
@@ -325,8 +319,6 @@ class AudioSeparatorD:
         for model_name in model_list:
             try:
                 start_time = time.time()
-                
-                # Initialize separator for this model
                 success, message = self.initialize_separator(model_name)
                 
                 if not success:
@@ -337,15 +329,11 @@ class AudioSeparatorD:
                     }
                     continue
                 
-                # Process audio
                 output_files = self.separator.separate(audio_file)
                 processing_time = time.time() - start_time
                 
-                # Analyze results
                 if output_files and os.path.exists(output_files[0]):
                     audio_data, sample_rate = sf.read(output_files[0])
-                    
-                    # Calculate quality metrics
                     quality_metrics = self._calculate_quality_metrics(audio_data, sample_rate)
                     
                     comparison_results["model_results"][model_name] = {
@@ -359,7 +347,6 @@ class AudioSeparatorD:
                         "model_info": self.get_available_models().get(model_name, {})
                     }
                     
-                    # Clean up
                     for file_path in output_files:
                         if os.path.exists(file_path):
                             os.remove(file_path)
@@ -377,7 +364,6 @@ class AudioSeparatorD:
                     "processing_time": 0
                 }
         
-        # Generate summary and recommendations
         comparison_results["summary"] = self._generate_comparison_summary(comparison_results["model_results"])
         comparison_results["recommendations"] = self._generate_recommendations(
             comparison_results["audio_analysis"], 
@@ -389,14 +375,9 @@ class AudioSeparatorD:
     def _calculate_quality_metrics(self, audio_data: np.ndarray, sample_rate: int) -> Dict:
         """Calculate audio quality metrics"""
         try:
-            # RMS level
             rms = np.sqrt(np.mean(audio_data**2))
-            
-            # Dynamic range
             peak = np.max(np.abs(audio_data))
             dynamic_range = 20 * np.log10(peak / (rms + 1e-10))
-            
-            # Spectral characteristics
             spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=audio_data, sr=sample_rate))
             
             return {
@@ -426,7 +407,6 @@ class AudioSeparatorD:
             "average_processing_time": 0
         }
         
-        # Find fastest and slowest
         if successful_results:
             times = {k: v.get("processing_time", 0) for k, v in successful_results.items()}
             summary["fastest_model"] = min(times.items(), key=lambda x: x[1])[0]
@@ -439,21 +419,17 @@ class AudioSeparatorD:
         """Generate intelligent recommendations based on comparison"""
         recommendations = []
         
-        # Find best performing model
         successful_models = {k: v for k, v in model_results.items() if v.get("status") == "Success"}
         
         if successful_models:
-            # Find fastest successful model
             fastest_model = min(successful_models.items(), 
                               key=lambda x: x[1].get("processing_time", float('inf')))
             recommendations.append(f"⚡ Fastest: {fastest_model[0]} ({fastest_model[1]['processing_time']:.2f}s)")
             
-            # Find model with most outputs
             most_outputs = max(successful_models.items(), 
                              key=lambda x: x[1].get("output_files", 0))
             recommendations.append(f"🎛️ Most stems: {most_outputs[0]} ({most_outputs[1]['output_files']} files)")
         
-        # Audio-based recommendations
         audio_type = audio_analysis.get('audio_type', 'unknown')
         if audio_type == 'bass_heavy':
             recommendations.append("🎸 Consider models with bass separation capabilities")
@@ -468,20 +444,17 @@ class AudioSeparatorD:
         """Initialize the separator with specified parameters"""
         try:
             with self.model_lock:
-                # Clean up previous separator if exists
                 if self.separator is not None:
                     del self.separator
                     torch.cuda.empty_cache()
                 
-                # Set default model if not specified
                 if model_name is None:
                     models = self.get_available_models()
                     if models:
-                        model_name = list(models.keys())[0]  # Use first available model
+                        model_name = list(models.keys())[0]
                     else:
                         return False, "No models available"
                 
-                # Initialize separator with updated parameters
                 self.separator = Separator(
                     output_format="WAV",
                     use_autocast=True,
@@ -489,7 +462,6 @@ class AudioSeparatorD:
                     **kwargs
                 )
                 
-                # Load the model
                 self.separator.load_model(model_name)
                 self.current_model = model_name
                 
@@ -509,7 +481,6 @@ class AudioSeparatorD:
         if model_name is None:
             return None, "No model selected"
         
-        # Auto-optimize parameters if enabled
         if enable_auto_optimize:
             audio_analysis = self.analyze_audio_characteristics(audio_file)
             custom_params = self._optimize_parameters_for_audio(audio_analysis, custom_params)
@@ -522,7 +493,6 @@ class AudioSeparatorD:
         try:
             start_time = time.time()
             
-            # Apply quality preset
             if custom_params is None:
                 custom_params = {}
             
@@ -541,32 +511,25 @@ class AudioSeparatorD:
                     "mdxc_params": {"batch_size": 1, "overlap": 16, "pitch_shift": 0}
                 })
             
-            # Update separator parameters
             for key, value in custom_params.items():
                 if hasattr(self.separator, key):
                     setattr(self.separator, key, value)
             
-            # Process the audio
             output_files = self.separator.separate(audio_file)
             
             processing_time = time.time() - start_time
             
-            # Read and prepare output audio
             output_audio = {}
             for file_path in output_files:
                 if os.path.exists(file_path):
-                    # Create output with appropriate naming
                     stem_name = os.path.splitext(os.path.basename(file_path))[0]
                     audio_data, sample_rate = sf.read(file_path)
                     output_audio[stem_name] = (sample_rate, audio_data)
-                    
-                    # Clean up file
                     os.remove(file_path)
             
             if not output_audio:
                 return None, "No output files generated"
             
-            # Record processing history
             history_entry = {
                 "timestamp": datetime.now().isoformat(),
                 "model": model_name,
@@ -589,24 +552,19 @@ class AudioSeparatorD:
         if custom_params is None:
             custom_params = {}
         
-        # Adjust parameters based on audio characteristics
         duration = audio_analysis.get('duration', 0)
         audio_type = audio_analysis.get('audio_type', 'balanced')
         
-        # For longer audio, increase batch size for efficiency
-        if duration > 300:  # 5 minutes
+        if duration > 300:
             custom_params.setdefault('mdx_params', {})['batch_size'] = 2
             custom_params.setdefault('vr_params', {})['batch_size'] = 2
         
-        # For bass-heavy audio, increase aggression
         if audio_type == 'bass_heavy':
             custom_params.setdefault('vr_params', {})['aggression'] = 7
         
-        # For bright/crisp audio, enable post-processing
         if audio_type == 'bright_crisp':
             custom_params.setdefault('vr_params', {})['enable_post_process'] = True
         
-        # For dynamic audio, enable TTA for better quality
         if audio_analysis.get('dynamic_range', 0) > 0.1:
             custom_params.setdefault('vr_params', {})['enable_tta'] = True
         
@@ -619,20 +577,17 @@ class AudioSeparatorD:
         
         history_text = "🎵 Enhanced Processing History\n\n"
         
-        # Show recent entries with details
         for i, entry in enumerate(self.processing_history[-10:], 1):
             history_text += f"**{i}. {entry['timestamp'][:19]}**\n"
             history_text += f"   Model: {entry['model']}\n"
             history_text += f"   Time: {entry['processing_time']:.2f}s\n"
             history_text += f"   Stems: {', '.join(entry['output_files'])}\n"
             
-            # Add audio analysis if available
             if 'audio_analysis' in entry and entry['audio_analysis']:
                 audio_type = entry['audio_analysis'].get('audio_type', 'unknown')
                 duration = entry['audio_analysis'].get('duration', 0)
                 history_text += f"   Audio: {audio_type} ({duration:.1f}s)\n"
             
-            # Add quality preset info
             if 'quality_preset' in entry:
                 history_text += f"   Preset: {entry['quality_preset']}\n"
             
@@ -657,7 +612,7 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
         
         **Smart AI-Powered Audio Source Separation with Auto-Selection & Advanced Model Comparison**
         
-        ✨ **Features**: Auto model selection, performance analytics, smart parameter optimization, and comprehensive model comparison
+        ✨ **Features**: Upload or select from 'audios' folder, auto model selection, performance analytics, smart parameter optimization.
         """
     )
     
@@ -666,28 +621,35 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
         system_info = demo1.get_system_info()
         info_text = f"""
         **PyTorch Version:** {system_info['pytorch_version']}
-        
         **Hardware Acceleration:** {system_info['device'].upper()}
-        
         **CUDA Available:** {system_info['cuda_available']} (Version: {system_info['cuda_version']})
-        
         **Apple Silicon (MPS):** {system_info['mps_available']}
-        
         **GPU Memory:** {system_info['memory_allocated'] // 1024**2}MB / {system_info['memory_total'] // 1024**2}MB
         """
         gr.Markdown(info_text)
     
     with gr.Row():
         with gr.Column():
-            # Main audio input
-            audio_input = gr.Audio(
-                label="🎵 Upload Audio File",
-                type="filepath"
-            )
+            # --- Input Section ---
+            gr.Markdown("### 🎵 Input Source")
             
-            # Add info text separately
-            gr.Markdown("*Upload audio for intelligent analysis and separation*")
-            
+            # Tab for Upload vs Folder
+            with gr.Tabs():
+                with gr.Tab("Upload File"):
+                    audio_input = gr.Audio(
+                        label="Upload Audio File",
+                        type="filepath"
+                    )
+                
+                with gr.Tab("Select from Folder"):
+                    folder_audio_choice = gr.Dropdown(
+                        label="Select from 'audios' folder",
+                        choices=get_local_audio_files(),
+                        interactive=True
+                    )
+                    refresh_folder_btn = gr.Button("🔄 Scan 'audios' Folder", size="sm")
+                    gr.Markdown("*Place your audio files in the 'audios' folder in the same directory as this script.*")
+
             # Auto-analyze button
             analyze_btn = gr.Button("🔍 Analyze Audio", variant="secondary")
             
@@ -717,7 +679,6 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
                     label="Selection Priority"
                 )
             
-            # Add info text separately
             gr.Markdown("*What matters most for model selection?*")
             
             # Model info display
@@ -736,7 +697,6 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
                     value=True
                 )
             
-            # Add info text separately
             gr.Markdown("*Automatically optimize parameters based on audio analysis*")
             
             # Enhanced advanced parameters
@@ -799,11 +759,9 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
         with gr.Tab("🔍 Model Explorer"):
             gr.Markdown("## 🧠 Intelligent Model Comparison & Selection")
             
-            # Enhanced model information
             model_info = gr.JSON(value=demo1.get_available_models(), label="📊 Model Database")
             refresh_models_btn = gr.Button("🔄 Refresh Models")
             
-            # Advanced model filtering
             with gr.Row():
                 filter_architecture = gr.Dropdown(
                     choices=["All", "MDX-Net", "Demucs", "Roformer", "VR Arch"],
@@ -827,7 +785,6 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
                 label="🎯 Models for Comparison"
             )
             
-            # Add info text separately
             gr.Markdown("*Select up to 5 models for detailed comparison*")
             
             compare_btn = gr.Button("🔬 Advanced Model Comparison")
@@ -853,15 +810,25 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
                 apply_recommendation_btn = gr.Button("✨ Apply Best Recommendation")
             
             recommendations_display = gr.JSON(label="🎯 Personalized Recommendations")
-    
+
+    # --- Helper Function for UI Logic ---
+    def get_effective_file(uploaded_file, folder_file):
+        """Determines which file to use: uploaded one or one from the 'audios' folder."""
+        if uploaded_file is not None:
+            return uploaded_file
+        if folder_file:
+            return os.path.join("audios", folder_file)
+        return None
+
     # Event handlers
-    def analyze_audio(audio_file):
-        if not audio_file:
+    def analyze_audio_wrapper(uploaded_file, folder_file):
+        effective_file = get_effective_file(uploaded_file, folder_file)
+        
+        if not effective_file:
             return None, "No audio file provided"
         
-        analysis = demo1.analyze_audio_characteristics(audio_file)
+        analysis = demo1.analyze_audio_characteristics(effective_file)
         
-        # Format analysis for display
         if "error" not in analysis:
             formatted_analysis = f"""
             **Audio Type:** {analysis.get('audio_type', 'Unknown').title().replace('_', ' ')}
@@ -871,26 +838,24 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
             **Spectral Characteristics:** {analysis.get('avg_spectral_centroid', 0):.0f} Hz (centroid)
             **Dynamic Range:** {analysis.get('dynamic_range', 0):.3f}
             """
-            
             return analysis, formatted_analysis
         else:
             return analysis, f"Analysis failed: {analysis['error']}"
     
-    def auto_select_model(audio_file, priority):
-        if not audio_file:
+    def auto_select_model_wrapper(uploaded_file, folder_file, priority):
+        effective_file = get_effective_file(uploaded_file, folder_file)
+        
+        if not effective_file:
             return None, "No audio file provided", None
         
-        # Analyze audio first
-        audio_analysis = demo1.analyze_audio_characteristics(audio_file)
+        audio_analysis = demo1.analyze_audio_characteristics(effective_file)
         
-        # Determine desired stems based on audio analysis
-        desired_stems = ["vocals"]  # Default
+        desired_stems = ["vocals"]
         if audio_analysis.get('audio_type') == 'bass_heavy':
             desired_stems.append("bass")
         elif audio_analysis.get('tempo', 0) > 120:
             desired_stems.append("drums")
         
-        # Auto-select model
         selected_model = demo1.auto_select_model(
             audio_analysis, desired_stems, priority.lower()
         )
@@ -917,7 +882,6 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
         model_info = models.get(model_name, {})
         
         if model_info:
-            # Format model information
             friendly_info = {
                 "🤖 Friendly Name": model_info.get('friendly_name', model_name),
                 "🏗️ Architecture": model_info.get('architecture_type', 'Unknown'),
@@ -926,19 +890,21 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
                 "🎯 Recommendations": model_info.get('recommended_for', {}),
                 "📊 Technical Details": {
                     "Filename": model_name,
-                    "Supported Stems": len(str(model_info)) // 10  # Rough estimate
+                    "Supported Stems": len(str(model_info)) // 10
                 }
             }
             return friendly_info
         
         return {"error": "Model information not available"}
     
-    def infer(audio_file, model_name, quality_preset, batch_size, segment_size, 
+    def infer_wrapper(uploaded_file, folder_file, model_name, quality_preset, batch_size, segment_size, 
                              overlap, denoise, tta, post_process, pitch_shift, auto_optimize):
-        if not audio_file or not model_name:
-            return None, None, None, None, None, "Please upload an audio file and select a model", None
         
-        # Prepare custom parameters
+        effective_file = get_effective_file(uploaded_file, folder_file)
+        
+        if not effective_file or not model_name:
+            return None, None, None, None, None, "Please select an audio file (upload or from folder) and a model", None
+        
         custom_params = {
             "mdx_params": {
                 "batch_size": int(batch_size),
@@ -950,7 +916,7 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
                 "batch_size": int(batch_size),
                 "enable_tta": tta,
                 "enable_post_process": post_process,
-                "aggression": 5  # Default
+                "aggression": 5
             },
             "demucs_params": {
                 "overlap": float(overlap)
@@ -963,7 +929,7 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
         }
         
         output_audio, status = demo1.infer(
-            audio_file, model_name, 
+            effective_file, model_name, 
             quality_preset=quality_preset, 
             custom_params=custom_params,
             enable_auto_optimize=auto_optimize
@@ -972,7 +938,6 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
         if output_audio is None:
             return None, None, None, None, None, status, None
         
-        # Extract different stems
         vocals = None
         instrumental = None
         drums = None
@@ -991,7 +956,6 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
             else:
                 other = (sample_rate, audio_data)
         
-        # Generate performance metrics
         performance_metrics = {
             "Model": model_name,
             "Quality Preset": quality_preset,
@@ -1001,29 +965,30 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
         
         return vocals, instrumental, drums, bass, other, status, performance_metrics
     
-    def compare_models_advanced(audio_file, model_list):
-        if not audio_file or not model_list:
-            return {"error": "Please upload an audio file and select models to compare"}
+    def compare_models_advanced(uploaded_file, folder_file, model_list):
+        effective_file = get_effective_file(uploaded_file, folder_file)
         
-        results = demo1.compare_models(audio_file, model_list)
+        if not effective_file or not model_list:
+            return {"error": "Please provide audio file and select models to compare"}
+        
+        results = demo1.compare_models(effective_file, model_list)
         return results
     
-    def get_smart_recommendations(audio_file):
-        if not audio_file:
-            return "Please upload an audio file first", {}
+    def get_smart_recommendations_wrapper(uploaded_file, folder_file):
+        effective_file = get_effective_file(uploaded_file, folder_file)
         
-        # Analyze audio
-        audio_analysis = demo1.analyze_audio_characteristics(audio_file)
+        if not effective_file:
+            return "Please upload or select an audio file first", {}
+        
+        audio_analysis = demo1.analyze_audio_characteristics(effective_file)
         models = demo1.get_available_models()
         
-        # Generate recommendations
         recommendations = {
             "audio_analysis": audio_analysis,
             "recommended_models": [],
             "tips": []
         }
         
-        # Quality-focused recommendations
         quality_models = []
         speed_models = []
         
@@ -1049,7 +1014,6 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
             "⚡ For Speed": speed_models[:3]
         }
         
-        # Audio-specific tips
         audio_type = audio_analysis.get('audio_type', 'balanced')
         if audio_type == 'bass_heavy':
             recommendations["tips"].append("🎸 Models with bass separation work best")
@@ -1061,12 +1025,13 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
         status = f"✅ Generated recommendations for {audio_analysis.get('audio_type', 'unknown')} audio"
         return status, recommendations
     
-    def apply_best_recommendation(audio_file):
-        if not audio_file:
-            return None, "Please upload an audio file first", None
+    def apply_best_recommendation_wrapper(uploaded_file, folder_file):
+        effective_file = get_effective_file(uploaded_file, folder_file)
         
-        # Get auto-selection with quality priority
-        audio_analysis = demo1.analyze_audio_characteristics(audio_file)
+        if not effective_file:
+            return None, "Please upload or select an audio file first", None
+        
+        audio_analysis = demo1.analyze_audio_characteristics(effective_file)
         selected_model = demo1.auto_select_model(
             audio_analysis, ["vocals"], "quality"
         )
@@ -1085,14 +1050,14 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
     
     # Wire up event handlers
     analyze_btn.click(
-        fn=analyze_audio,
-        inputs=[audio_input],
+        fn=analyze_audio_wrapper,
+        inputs=[audio_input, folder_audio_choice],
         outputs=[audio_analysis_output, recommendation_status]
     )
     
     auto_select_btn.click(
-        fn=auto_select_model,
-        inputs=[audio_input, priority_radio],
+        fn=auto_select_model_wrapper,
+        inputs=[audio_input, folder_audio_choice, priority_radio],
         outputs=[model_dropdown, recommendation_status, model_info_display]
     )
     
@@ -1103,9 +1068,9 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
     )
     
     process_btn.click(
-        fn=infer,
+        fn=infer_wrapper,
         inputs=[
-            audio_input, model_dropdown, quality_preset,
+            audio_input, folder_audio_choice, model_dropdown, quality_preset,
             batch_size, segment_size, overlap, denoise, tta, post_process, 
             pitch_shift, auto_optimize
         ],
@@ -1117,8 +1082,13 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
     
     compare_btn.click(
         fn=compare_models_advanced,
-        inputs=[audio_input, filtered_models],
+        inputs=[audio_input, folder_audio_choice, filtered_models],
         outputs=[comparison_results]
+    )
+    
+    refresh_folder_btn.click(
+        fn=lambda: gr.Dropdown(choices=get_local_audio_files(), value=None),
+        outputs=[folder_audio_choice]
     )
     
     refresh_models_btn.click(
@@ -1137,14 +1107,14 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
     )
     
     get_recommendations_btn.click(
-        fn=get_smart_recommendations,
-        inputs=[audio_input],
+        fn=get_smart_recommendations_wrapper,
+        inputs=[audio_input, folder_audio_choice],
         outputs=[recommendation_status, recommendations_display]
     )
     
     apply_recommendation_btn.click(
-        fn=apply_best_recommendation,
-        inputs=[audio_input],
+        fn=apply_best_recommendation_wrapper,
+        inputs=[audio_input, folder_audio_choice],
         outputs=[model_dropdown, recommendation_status, model_info_display]
     )
     
@@ -1182,7 +1152,6 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
         if not batch_files:
             return None, "Please upload batch files"
         
-        # Auto-select best model for first file as representative
         if batch_files:
             audio_analysis = demo1.analyze_audio_characteristics(batch_files[0])
             selected_model = demo1.auto_select_model(audio_analysis, ["vocals"], priority.lower())
