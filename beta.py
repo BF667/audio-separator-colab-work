@@ -622,7 +622,7 @@ with gr.Blocks(theme="NeoPy/Soft", title="🎵 Enhanced Audio Separator") as app
         info_text = f"""
         **PyTorch Version:** {system_info['pytorch_version']}
         **Hardware Acceleration:** {system_info['device'].upper()}
-        **CUDA Available:** {system_info['cuda_available']} (Version: {system_info['cuda_version']})
+        **CUDA Available:** {system_info['cuda_available']}\n (Version: {system_info['cuda_version']})
         **Apple Silicon (MPS):** {system_info['mps_available']}
         **GPU Memory:** {system_info['memory_allocated'] // 1024**2}MB / {system_info['memory_total'] // 1024**2}MB
         """
